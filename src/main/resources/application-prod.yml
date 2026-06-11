@@ -1,0 +1,16 @@
+server:
+  port: 8443
+  ssl:
+    enabled: true
+    key-store: /certs/nexbridge.p12
+    key-store-password: ${SSL_KEYSTORE_PASSWORD}
+    protocol: TLSv1.3
+    enabled-protocols: TLSv1.3
+
+spring:
+  jpa:
+    show-sql: false
+
+nexbridge:
+  lgpd:
+    auto-mask: true
