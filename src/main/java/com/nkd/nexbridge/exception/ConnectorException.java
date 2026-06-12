@@ -12,4 +12,8 @@ public class ConnectorException extends NexBridgeException {
     public ConnectorException(String errorCode, String message) {
         super(errorCode, message);
     }
+
+    public ConnectorException(String errorCode, String message, Throwable cause) {
+        super(errorCode, message, cause);
+    }
 }

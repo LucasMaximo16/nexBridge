@@ -55,3 +55,17 @@ nexbridge:
   connector:
     default-timeout-ms: 5000
     health-check-interval-sec: 30
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      show-details: never
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: nexbridge

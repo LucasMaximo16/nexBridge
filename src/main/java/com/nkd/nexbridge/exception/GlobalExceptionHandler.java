@@ -3,6 +3,8 @@ package com.nkd.nexbridge.exception;
 import com.nkd.nexbridge.api.dto.NexError;
 import com.nkd.nexbridge.api.dto.NexMeta;
 import com.nkd.nexbridge.api.dto.NexResponse;
+import com.nkd.nexbridge.config.NexBridgeProperties;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,8 +19,11 @@ import java.time.Instant;
 import java.util.stream.Collectors;
 
 @RestControllerAdvice
+@RequiredArgsConstructor
 @Slf4j
 public class GlobalExceptionHandler {
+
+    private final NexBridgeProperties properties;
 
     @ExceptionHandler(ConnectorException.class)
     public ResponseEntity<NexResponse<Void>> handleConnectorException(ConnectorException ex) {
@@ -95,7 +100,7 @@ public class GlobalExceptionHandler {
     private NexMeta buildMeta() {
         return NexMeta.builder()
                 .timestamp(Instant.now().toString())
-                .nexbridgeVersion("1.0.0")
+                .nexbridgeVersion(properties.getVersion())
                 .build();
     }
 }

@@ -7,6 +7,7 @@ import com.nkd.nexbridge.api.dto.NexError;
 import com.nkd.nexbridge.api.dto.NexMeta;
 import com.nkd.nexbridge.api.dto.NexResponse;
 import com.nkd.nexbridge.api.filter.TraceIdFilter;
+import com.nkd.nexbridge.config.NexBridgeProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -22,6 +23,7 @@ import java.util.Optional;
 public class AuditController {
 
     private final AuditService auditService;
+    private final NexBridgeProperties properties;
 
     @GetMapping
     public ResponseEntity<NexResponse<Page<AuditEntry>>> findAll(
@@ -67,7 +69,7 @@ public class AuditController {
         return NexMeta.builder()
                 .traceId(TraceIdFilter.current())
                 .timestamp(Instant.now().toString())
-                .nexbridgeVersion("1.0.0")
+                .nexbridgeVersion(properties.getVersion())
                 .build();
     }
 }
