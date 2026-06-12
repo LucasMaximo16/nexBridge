@@ -7,64 +7,57 @@ import com.nkd.nexbridge.api.filter.TraceIdFilter;
 import com.nkd.nexbridge.config.NexBridgeProperties;
 import com.nkd.nexbridge.domain.RoutingDefinition;
 import com.nkd.nexbridge.domain.RoutingDefinitionRepository;
+import com.nkd.nexbridge.exception.NexBridgeException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/admin/routing")
+@RequestMapping("/api/v1/admin/routing")
 @RequiredArgsConstructor
 public class AdminRoutingController {
 
     private final RoutingDefinitionRepository routingRepository;
     private final NexBridgeProperties properties;
 
-    @PostMapping
-    public ResponseEntity<NexResponse<RoutingDefinition>> create(@RequestBody RoutingDefinition def) {
-        return ResponseEntity.ok(NexResponse.ok(routingRepository.save(def), buildMeta()));
-    }
-
     @GetMapping
     public ResponseEntity<NexResponse<List<RoutingDefinition>>> list() {
         return ResponseEntity.ok(NexResponse.ok(routingRepository.findAll(), buildMeta()));
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<NexResponse<RoutingDefinition>> findById(@PathVariable UUID id) {
-        Optional<RoutingDefinition> def = routingRepository.findById(id);
-        if (def.isEmpty()) {
-            return ResponseEntity.status(404).body(NexResponse.error(
-                    NexError.builder().code("NOT_FOUND").message("Roteamento não encontrado").httpStatus(404).build(),
-                    buildMeta()));
-        }
-        return ResponseEntity.ok(NexResponse.ok(def.get(), buildMeta()));
+    @GetMapping("/{routingId}")
+    public ResponseEntity<NexResponse<RoutingDefinition>> findByRoutingId(@PathVariable String routingId) {
+        RoutingDefinition def = routingRepository.findByRoutingId(routingId)
+                .orElseThrow(() -> new NexBridgeException("NOT_FOUND", "Roteamento não encontrado: " + routingId));
+        return ResponseEntity.ok(NexResponse.ok(def, buildMeta()));
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<NexResponse<RoutingDefinition>> update(@PathVariable UUID id,
-                                                                   @RequestBody RoutingDefinition body) {
-        if (!routingRepository.existsById(id)) {
-            return ResponseEntity.status(404).body(NexResponse.error(
-                    NexError.builder().code("NOT_FOUND").message("Roteamento não encontrado").httpStatus(404).build(),
-                    buildMeta()));
-        }
-        body.setId(id);
-        return ResponseEntity.ok(NexResponse.ok(routingRepository.save(body), buildMeta()));
+    @PostMapping
+    public ResponseEntity<NexResponse<RoutingDefinition>> create(@RequestBody RoutingDefinition def) {
+        return ResponseEntity.ok(NexResponse.ok(routingRepository.save(def), buildMeta()));
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<NexResponse<Void>> delete(@PathVariable UUID id) {
-        if (!routingRepository.existsById(id)) {
-            return ResponseEntity.status(404).body(NexResponse.error(
-                    NexError.builder().code("NOT_FOUND").message("Roteamento não encontrado").httpStatus(404).build(),
-                    buildMeta()));
-        }
-        routingRepository.deleteById(id);
+    @PutMapping("/{routingId}")
+    public ResponseEntity<NexResponse<RoutingDefinition>> update(@PathVariable String routingId,
+                                                                  @RequestBody RoutingDefinition body) {
+        RoutingDefinition existing = routingRepository.findByRoutingId(routingId)
+                .orElseThrow(() -> new NexBridgeException("NOT_FOUND", "Roteamento não encontrado: " + routingId));
+        existing.setApiPath(body.getApiPath());
+        existing.setApiMethod(body.getApiMethod());
+        existing.setDestinations(body.getDestinations());
+        existing.setActive(body.isActive());
+        return ResponseEntity.ok(NexResponse.ok(routingRepository.save(existing), buildMeta()));
+    }
+
+    @DeleteMapping("/{routingId}")
+    public ResponseEntity<NexResponse<Void>> deactivate(@PathVariable String routingId) {
+        RoutingDefinition existing = routingRepository.findByRoutingId(routingId)
+                .orElseThrow(() -> new NexBridgeException("NOT_FOUND", "Roteamento não encontrado: " + routingId));
+        existing.setActive(false);
+        routingRepository.save(existing);
         return ResponseEntity.ok(NexResponse.ok(null, buildMeta()));
     }
 
