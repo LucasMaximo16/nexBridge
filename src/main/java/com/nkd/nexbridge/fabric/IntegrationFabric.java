@@ -17,16 +17,18 @@ import com.nkd.nexbridge.mapper.FieldMapping;
 import com.nkd.nexbridge.mapper.MappingConfig;
 import com.nkd.nexbridge.mapper.TransformRule;
 import com.nkd.nexbridge.api.filter.TraceIdFilter;
-import lombok.RequiredArgsConstructor;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class IntegrationFabric {
 
@@ -35,14 +37,52 @@ public class IntegrationFabric {
     private final FieldMapper fieldMapper;
     private final LgpdMasker lgpdMasker;
     private final AuditService auditService;
+    private final MeterRegistry meterRegistry;
+
+    private final Counter requestsTotal;
+    private final Counter requestsSuccess;
+    private final Counter requestsError;
+    private final Counter lgpdMaskingsTotal;
+    private final Timer requestLatency;
 
     @Value("${nexbridge.lgpd.auto-mask:true}")
     private boolean autoMask;
+
+    public IntegrationFabric(ConnectorRegistry connectorRegistry,
+                             MappingDefinitionRepository mappingRepository,
+                             FieldMapper fieldMapper,
+                             LgpdMasker lgpdMasker,
+                             AuditService auditService,
+                             MeterRegistry meterRegistry) {
+        this.connectorRegistry = connectorRegistry;
+        this.mappingRepository = mappingRepository;
+        this.fieldMapper = fieldMapper;
+        this.lgpdMasker = lgpdMasker;
+        this.auditService = auditService;
+        this.meterRegistry = meterRegistry;
+
+        this.requestsTotal   = Counter.builder("nexbridge.requests.total")
+                .description("Total de requisições processadas pelo IntegrationFabric")
+                .register(meterRegistry);
+        this.requestsSuccess = Counter.builder("nexbridge.requests.success")
+                .description("Requisições com resultado SUCCESS")
+                .register(meterRegistry);
+        this.requestsError   = Counter.builder("nexbridge.requests.error")
+                .description("Requisições com resultado ERROR")
+                .register(meterRegistry);
+        this.lgpdMaskingsTotal = Counter.builder("nexbridge.lgpd.maskings.total")
+                .description("Total de campos mascarados pelo LgpdMasker")
+                .register(meterRegistry);
+        this.requestLatency  = Timer.builder("nexbridge.request.latency")
+                .description("Latência das requisições processadas (ms)")
+                .register(meterRegistry);
+    }
 
     public FlowContext execute(RouteDefinition route, Map<String, Object> requestData,
                                String consumerId, String consumerIp) {
         String traceId = TraceIdFilter.current();
         Instant start = Instant.now();
+        requestsTotal.increment();
 
         FlowContext.FlowContextBuilder ctx = FlowContext.builder()
                 .traceId(traceId)
@@ -57,7 +97,6 @@ public class IntegrationFabric {
                 .requestData(requestData);
 
         try {
-            // 1. Load mapping
             MappingDefinition mappingDef = mappingRepository
                     .findByMappingIdAndVersion(route.getMappingId(), route.getMappingVersion())
                     .orElseThrow(() -> new MappingException("MAPPING_NOT_FOUND",
@@ -66,14 +105,11 @@ public class IntegrationFabric {
             MappingConfig mappingConfig = toMappingConfig(mappingDef);
             ctx.copybookId(mappingDef.getCopybookId());
 
-            // 2. Validate request before touching legacy
             fieldMapper.validateRequest(requestData, mappingConfig);
 
-            // 3. Map request: app → legacy format
             FieldMapper.MapResult requestResult = fieldMapper.mapRequest(requestData, mappingConfig);
             ctx.discardedFields(requestResult.discardedFields());
 
-            // 4. Get connector and send
             LegacyConnector connector = connectorRegistry.get(route.getConnectorId());
             ctx.sourceSystem(connector.getType().name() + " / " + route.getConnectorId());
 
@@ -92,7 +128,6 @@ public class IntegrationFabric {
                         connectorResponse.getErrorMessage() != null ? connectorResponse.getErrorMessage() : "Connector returned failure");
             }
 
-            // 5. Map response: legacy → app format
             Map<String, Object> rawResponse = connectorResponse.getResultSet() != null
                     ? connectorResponse.getResultSet()
                     : Map.of();
@@ -100,33 +135,37 @@ public class IntegrationFabric {
             FieldMapper.MapResult responseResult = fieldMapper.mapResponse(rawResponse, mappingConfig);
             Map<String, Object> mappedResponse = new LinkedHashMap<>(responseResult.output());
 
-            // 6. LGPD masking — ALWAYS applied when auto-mask is true
             List<String> maskedFields = new ArrayList<>();
             if (autoMask) {
                 LgpdMasker.MaskResult maskResult = lgpdMasker.mask(mappedResponse);
                 maskedFields = maskResult.maskedFields();
+                if (!maskedFields.isEmpty()) {
+                    lgpdMaskingsTotal.increment(maskedFields.size());
+                }
             }
 
-            int durationMs = (int) (System.currentTimeMillis() - start.toEpochMilli());
+            long durationMs = System.currentTimeMillis() - start.toEpochMilli();
+            requestLatency.record(durationMs, TimeUnit.MILLISECONDS);
+            requestsSuccess.increment();
 
             FlowContext result = ctx
                     .responseData(mappedResponse)
                     .maskedFields(maskedFields)
-                    .durationMs(durationMs)
+                    .durationMs((int) durationMs)
                     .success(true)
                     .build();
 
-            // 7. Audit — async, never blocks flow
             auditService.save(buildAuditEntry(result, 200));
-
             return result;
 
         } catch (Exception e) {
-            int durationMs = (int) (System.currentTimeMillis() - start.toEpochMilli());
+            long durationMs = System.currentTimeMillis() - start.toEpochMilli();
+            requestLatency.record(durationMs, TimeUnit.MILLISECONDS);
+            requestsError.increment();
             log.error("IntegrationFabric error traceId={}: {}", traceId, e.getMessage());
 
             FlowContext errorCtx = ctx
-                    .durationMs(durationMs)
+                    .durationMs((int) durationMs)
                     .success(false)
                     .errorCode(e instanceof com.nkd.nexbridge.exception.NexBridgeException nbe ? nbe.getErrorCode() : "INTERNAL_ERROR")
                     .errorMessage(e.getMessage())
