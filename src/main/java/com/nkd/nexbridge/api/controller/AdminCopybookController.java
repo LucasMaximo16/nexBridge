@@ -8,6 +8,7 @@ import com.nkd.nexbridge.domain.CopybookDefinitionRepository;
 import com.nkd.nexbridge.mapper.copybook.CopybookField;
 import com.nkd.nexbridge.mapper.copybook.CopybookParser;
 import com.nkd.nexbridge.mapper.copybook.CopybookRegistry;
+import com.nkd.nexbridge.config.NexBridgeProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,7 @@ public class AdminCopybookController {
     private final CopybookRegistry copybookRegistry;
     private final CopybookDefinitionRepository copybookRepository;
     private final CopybookParser copybookParser;
+    private final NexBridgeProperties properties;
 
     @PostMapping
     public ResponseEntity<NexResponse<CopybookDefinition>> create(@RequestBody Map<String, Object> body) {
@@ -61,7 +63,7 @@ public class AdminCopybookController {
         return NexMeta.builder()
                 .traceId(TraceIdFilter.current())
                 .timestamp(Instant.now().toString())
-                .nexbridgeVersion("1.0.0")
+                .nexbridgeVersion(properties.getVersion())
                 .build();
     }
 }

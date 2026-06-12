@@ -8,6 +8,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import com.nkd.nexbridge.config.NexBridgeProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +32,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private int defaultRequestsPerMinute;
 
     private final ObjectMapper objectMapper;
+    private final NexBridgeProperties properties;
 
     private final ConcurrentHashMap<String, RateLimiter> limiters = new ConcurrentHashMap<>();
 
@@ -54,7 +56,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             var meta = NexMeta.builder()
                     .traceId(TraceIdFilter.current())
                     .timestamp(Instant.now().toString())
-                    .nexbridgeVersion("1.0.0")
+                    .nexbridgeVersion(properties.getVersion())
                     .build();
             objectMapper.writeValue(response.getWriter(), NexResponse.error(error, meta));
             return;
