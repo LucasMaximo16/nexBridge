@@ -1,0 +1,16 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  kafka:
+    bootstrap-servers: localhost:9092
+nexbridge:
+  version: 1.0.0-test
+  jwt:
+    secret: test-secret-key-for-testing-only-not-for-production
+    expiration-ms: 3600000
+  vault:
+    master-key: test-vault-key
+    store-path: /tmp/test-vault.enc
+  lgpd:
+    auto-mask: true
