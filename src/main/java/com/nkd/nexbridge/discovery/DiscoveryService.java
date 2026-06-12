@@ -8,16 +8,14 @@ import com.nkd.nexbridge.domain.ConnectorDefinition;
 import com.nkd.nexbridge.domain.ConnectorDefinitionRepository;
 import com.nkd.nexbridge.domain.CopybookDefinition;
 import com.nkd.nexbridge.domain.CopybookDefinitionRepository;
+import com.nkd.nexbridge.domain.MappingDefinition;
+import com.nkd.nexbridge.domain.MappingDefinitionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +24,7 @@ public class DiscoveryService {
 
     private final ConnectorDefinitionRepository connectorRepository;
     private final CopybookDefinitionRepository copybookRepository;
+    private final MappingDefinitionRepository mappingRepository;
     private final CobolProgramScanner cobolProgramScanner;
     private final VsamDatasetScanner vsamDatasetScanner;
     private final JclJobScanner jclJobScanner;
@@ -51,24 +50,18 @@ public class DiscoveryService {
 
                 programasCobol.addAll(cobolProgramScanner.scan(connId, config));
                 datasetsVsam.addAll(vsamDatasetScanner.scan(connId, config));
-
-                List<JclJobScanner.JclJob> jobs = jclJobScanner.scan(connId, config);
-                for (JclJobScanner.JclJob job : jobs) {
-                    if (job.name() != null) {
-                        jclNames.add(job.name());
-                    }
-                }
-
+                jclJobScanner.scan(connId, config).stream()
+                        .filter(j -> j.name() != null)
+                        .map(JclJobScanner.JclJob::name)
+                        .forEach(jclNames::add);
                 shadowIntegrations.addAll(shadowIntegrationScanner.scan(connId, config));
             }
 
             int totalLinhasCobol = computeTotalCobolLines(connectors);
-            log.info("DiscoveryService: total de linhas COBOL aproximado: {}", totalLinhasCobol);
-
             List<String> dadosSensiveis = collectSensitiveFields(connectors);
-            log.info("DiscoveryService: {} campos sensíveis detectados", dadosSensiveis.size());
+            log.info("DiscoveryService: discovery concluído — {} programas, {} campos sensíveis", programasCobol.size(), dadosSensiveis.size());
 
-            DiscoveryResult result = DiscoveryResult.builder()
+            return DiscoveryResult.builder()
                     .sistema(sistemaParam)
                     .programasCobol(new ArrayList<>(programasCobol))
                     .datasetsVsam(new ArrayList<>(datasetsVsam))
@@ -79,9 +72,6 @@ public class DiscoveryService {
                     .totalLinhasCobol(totalLinhasCobol)
                     .scannedAt(Instant.now())
                     .build();
-
-            log.info("DiscoveryService: discovery concluído para '{}'", sistemaParam);
-            return result;
 
         } catch (Exception e) {
             log.warn("DiscoveryService: erro durante discovery para '{}': {}", sistemaParam, e.getMessage());
@@ -99,16 +89,112 @@ public class DiscoveryService {
         }
     }
 
+    public List<JclJobScanner.JclJob> discoverJobs(String sistemaParam) {
+        List<ConnectorDefinition> connectors = resolveConnectors(sistemaParam);
+        List<JclJobScanner.JclJob> allJobs = new ArrayList<>();
+        for (ConnectorDefinition connector : connectors) {
+            allJobs.addAll(jclJobScanner.scan(connector.getConnectorId(), connector.getConfig()));
+        }
+        return allJobs;
+    }
+
+    // RF-008: Mapa de dependências entre sistemas
+    public DependencyGraph buildDependencyGraph() {
+        log.info("DiscoveryService: construindo grafo de dependências entre sistemas");
+
+        List<ConnectorDefinition> allConnectors = connectorRepository.findAll();
+        List<MappingDefinition> allMappings = mappingRepository.findAll();
+
+        // Nó "NexBridge" central
+        List<SystemNode> nodes = new ArrayList<>();
+        List<SystemDependency> edges = new ArrayList<>();
+
+        nodes.add(new SystemNode(
+                "nexbridge",
+                "INTEGRATION_FABRIC",
+                "NexBridge",
+                List.of(),
+                List.of(),
+                List.of()
+        ));
+
+        // Um nó por conector legado
+        for (ConnectorDefinition connector : allConnectors) {
+            Map<String, Object> config = connector.getConfig();
+            String connId = connector.getConnectorId();
+
+            List<String> programs = cobolProgramScanner.scan(connId, config);
+            List<String> datasets = vsamDatasetScanner.scan(connId, config);
+            List<String> sensitive = collectSensitiveFields(List.of(connector));
+
+            nodes.add(new SystemNode(
+                    connId,
+                    connector.getType(),
+                    connector.getName(),
+                    programs,
+                    datasets,
+                    sensitive
+            ));
+
+            // Aresta: NexBridge → conector legado
+            String protocol = protocolFor(connector.getType());
+            edges.add(new SystemDependency(
+                    "nexbridge",
+                    connId,
+                    protocol,
+                    "NexBridge integra com " + connector.getName() + " via " + protocol
+            ));
+        }
+
+        // Arestas derivadas dos mappings: conector A → conector B quando compartilham routing
+        Set<String> processedPairs = new HashSet<>();
+        for (MappingDefinition mapping : allMappings) {
+            String connId = mapping.getConnectorId();
+            // Verifica se há outros mappings que apontam para o mesmo copybook — dependência indireta
+            if (mapping.getCopybookId() != null) {
+                for (MappingDefinition other : allMappings) {
+                    if (!other.getMappingId().equals(mapping.getMappingId())
+                            && mapping.getCopybookId().equals(other.getCopybookId())
+                            && !other.getConnectorId().equals(connId)) {
+                        String pairKey = connId + "->" + other.getConnectorId();
+                        if (processedPairs.add(pairKey)) {
+                            edges.add(new SystemDependency(
+                                    connId,
+                                    other.getConnectorId(),
+                                    "COPYBOOK_SHARED",
+                                    "Compartilham copybook '" + mapping.getCopybookId() + "'"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        log.info("DiscoveryService: grafo construído — {} nós, {} arestas", nodes.size(), edges.size());
+        return new DependencyGraph(nodes, edges, nodes.size(), edges.size(), Instant.now());
+    }
+
+    private String protocolFor(String type) {
+        return switch (type) {
+            case "TCP"        -> "TCP/mTLS";
+            case "JDBC"       -> "JDBC/SQL";
+            case "SOAP"       -> "SOAP/WSDL";
+            case "IBM_MQ"     -> "IBM MQ";
+            case "FILE"       -> "FTP/SFTP";
+            case "SALESFORCE" -> "REST/OAuth2";
+            case "SAP_RFC"    -> "SAP RFC";
+            default           -> type;
+        };
+    }
+
     private List<ConnectorDefinition> resolveConnectors(String sistemaParam) {
         try {
             if ("mainframe".equalsIgnoreCase(sistemaParam)) {
-                List<ConnectorDefinition> all = connectorRepository.findAll();
-                return all.stream()
+                return connectorRepository.findAll().stream()
                         .filter(c -> "TCP".equals(c.getType()) || "JDBC".equals(c.getType()) || "IBM_MQ".equals(c.getType()))
                         .toList();
             } else if ("as400".equalsIgnoreCase(sistemaParam)) {
-                List<ConnectorDefinition> all = connectorRepository.findAll();
-                return all.stream()
+                return connectorRepository.findAll().stream()
                         .filter(c -> "JDBC".equals(c.getType()) || "SOAP".equals(c.getType()) || "FILE".equals(c.getType()))
                         .toList();
             } else {
@@ -138,19 +224,13 @@ public class DiscoveryService {
         try {
             List<String> sensitive = new ArrayList<>();
             for (ConnectorDefinition connector : connectors) {
-                List<CopybookDefinition> copybooks = copybookRepository.findByConnectorId(connector.getConnectorId());
-                for (CopybookDefinition copybook : copybooks) {
+                for (CopybookDefinition copybook : copybookRepository.findByConnectorId(connector.getConnectorId())) {
                     if (copybook.getParsedFields() == null) continue;
                     for (Map<String, Object> field : copybook.getParsedFields()) {
-                        Object sensitiveFlag = field.get("sensitive");
-                        if (Boolean.TRUE.equals(sensitiveFlag)) {
+                        if (Boolean.TRUE.equals(field.get("sensitive"))) {
                             Object cobolName = field.get("cobolName");
                             Object name = field.get("name");
-                            if (cobolName != null) {
-                                sensitive.add(name + " (" + cobolName + ")");
-                            } else if (name != null) {
-                                sensitive.add(name.toString());
-                            }
+                            sensitive.add(name + (cobolName != null ? " (" + cobolName + ")" : ""));
                         }
                     }
                 }
