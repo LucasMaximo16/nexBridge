@@ -10,6 +10,7 @@ import com.nkd.nexbridge.domain.ApiDefinitionRepository;
 import com.nkd.nexbridge.exception.NexBridgeException;
 import com.nkd.nexbridge.fabric.FlowContext;
 import com.nkd.nexbridge.fabric.IntegrationFabric;
+import com.nkd.nexbridge.fabric.ResponseCacheService;
 import com.nkd.nexbridge.fabric.RouteDefinition;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class DataController {
     private final ApiDefinitionRepository apiDefinitionRepository;
     private final IntegrationFabric integrationFabric;
     private final NexBridgeProperties properties;
+    private final ResponseCacheService responseCache;
 
     @PostMapping("/api/{version}/{resource}")
     public ResponseEntity<NexResponse<Map<String, Object>>> post(
@@ -113,8 +115,29 @@ public class DataController {
                 .status(api.getStatus())
                 .build();
 
+        // Check cache (apenas se cacheTtlSec > 0 e método GET)
+        if ("GET".equals(method) && api.getCacheTtlSec() > 0) {
+            String cacheKey = responseCache.buildKey(path, method, data);
+            Optional<Map<String, Object>> cached = responseCache.get(cacheKey);
+            if (cached.isPresent()) {
+                log.debug("DataController: cache HIT for {}", cacheKey);
+                NexMeta meta = NexMeta.builder()
+                        .traceId(TraceIdFilter.current())
+                        .timestamp(java.time.Instant.now().toString())
+                        .nexbridgeVersion(properties.getVersion())
+                        .sourceSystem("CACHE")
+                        .build();
+                return ResponseEntity.ok(NexResponse.ok(cached.get(), meta));
+            }
+        }
+
         try {
             FlowContext ctx = integrationFabric.execute(route, data, consumerId, consumerIp);
+            // Store in cache if TTL > 0 and GET
+            if ("GET".equals(method) && api.getCacheTtlSec() > 0 && ctx.isSuccess()) {
+                String cacheKey = responseCache.buildKey(path, method, data);
+                responseCache.put(cacheKey, ctx.getResponseData(), api.getCacheTtlSec());
+            }
             return ResponseEntity.ok(NexResponse.ok(ctx.getResponseData(), buildMeta(ctx)));
         } catch (NexBridgeException e) {
             var error = NexError.builder()
