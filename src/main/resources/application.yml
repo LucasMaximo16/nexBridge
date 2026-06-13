@@ -55,6 +55,11 @@ nexbridge:
   connector:
     default-timeout-ms: 5000
     health-check-interval-sec: 30
+  observability:
+    alerts:
+      error-rate-threshold: 0.1
+      latency-p99-threshold-ms: 2000.0
+      check-interval-seconds: 60
   alerts:
     enabled: false
     slack-webhook-url:
@@ -81,3 +86,10 @@ management:
   metrics:
     tags:
       application: nexbridge
+    distribution:
+      percentiles-histogram:
+        nexbridge.request.latency: true
+      percentiles:
+        nexbridge.request.latency: 0.5, 0.95, 0.99
+      slo:
+        nexbridge.request.latency: 100ms, 500ms, 1000ms
