@@ -7,6 +7,7 @@ import com.nkd.nexbridge.connector.sap.SapRfcConnector;
 import com.nkd.nexbridge.connector.salesforce.SalesforceConnector;
 import com.nkd.nexbridge.connector.soap.SoapConnector;
 import com.nkd.nexbridge.connector.tcp.TcpConnector;
+import com.nkd.nexbridge.connector.totvs.TotvsProtheusConnector;
 import com.nkd.nexbridge.domain.ConnectorDefinition;
 import com.nkd.nexbridge.security.MtlsConfig;
 import com.nkd.nexbridge.security.VaultService;
@@ -29,7 +30,8 @@ public class ConnectorFactory {
             case IBM_MQ     -> new IbmMqConnector(vaultService);
             case FILE       -> new FileConnector(vaultService);
             case SALESFORCE -> new SalesforceConnector(vaultService);
-            case SAP_RFC    -> new SapRfcConnector(vaultService);
+            case SAP_RFC         -> new SapRfcConnector(vaultService);
+            case TOTVS_PROTHEUS  -> new TotvsProtheusConnector(vaultService);
         };
     }
 }
