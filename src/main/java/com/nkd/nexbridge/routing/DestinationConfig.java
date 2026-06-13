@@ -12,6 +12,9 @@ public class DestinationConfig {
     private String destinationId;
     private DestinationType type;
     private List<RoutingCondition> conditions;
+    /** "AND" (default) or "OR" — controls how conditions are evaluated. */
+    @Builder.Default
+    private String conditionLogic = "AND";
     private String connectorId;
     private String topic;
     private String url;
@@ -21,4 +24,6 @@ public class DestinationConfig {
     @Builder.Default
     private long retryDelayMs = 1000;
     private Map<String, String> headers;
+    /** Destination-specific config (e.g. for RABBITMQ, SQS). Also holds "format" key. */
+    private Map<String, Object> config;
 }
