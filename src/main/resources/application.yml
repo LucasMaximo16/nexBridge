@@ -55,6 +55,18 @@ nexbridge:
   connector:
     default-timeout-ms: 5000
     health-check-interval-sec: 30
+  alerts:
+    enabled: false
+    slack-webhook-url:
+    slack-channel: "#nexbridge-alerts"
+    email-enabled: false
+    email-to: []
+    smtp-host: localhost
+    smtp-port: 587
+    smtp-user:
+    smtp-password-ref:
+    pagerduty-enabled: false
+    pagerduty-routing-key:
 
 management:
   endpoints:
