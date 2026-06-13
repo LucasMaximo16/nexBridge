@@ -30,20 +30,24 @@ public class DiscoveryController {
                 .build();
     }
 
+    // RF-001 a RF-007: Discovery completo de um sistema
     @GetMapping("/discovery")
     public NexResponse<DiscoveryResult> discover(@RequestParam String sistema) {
         log.info("DiscoveryController: GET /discovery?sistema={}", sistema);
-        DiscoveryResult result = discoveryService.discover(sistema);
-        return NexResponse.ok(result, buildMeta());
+        return NexResponse.ok(discoveryService.discover(sistema), buildMeta());
     }
 
+    // RF-004: Inventário completo de JCL jobs com todos os campos
     @GetMapping("/discovery/jobs")
     public NexResponse<List<JclJobScanner.JclJob>> discoverJobs(@RequestParam String sistema) {
         log.info("DiscoveryController: GET /discovery/jobs?sistema={}", sistema);
-        DiscoveryResult result = discoveryService.discover(sistema);
-        List<JclJobScanner.JclJob> jobs = result.getJcls().stream()
-                .map(name -> new JclJobScanner.JclJob(name, null, null, null))
-                .toList();
-        return NexResponse.ok(jobs, buildMeta());
+        return NexResponse.ok(discoveryService.discoverJobs(sistema), buildMeta());
+    }
+
+    // RF-008: Mapa de dependências entre sistemas (grafo dirigido)
+    @GetMapping("/discovery/dependencies")
+    public NexResponse<DependencyGraph> discoverDependencies() {
+        log.info("DiscoveryController: GET /discovery/dependencies");
+        return NexResponse.ok(discoveryService.buildDependencyGraph(), buildMeta());
     }
 }
